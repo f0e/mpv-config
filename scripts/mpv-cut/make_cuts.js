@@ -8,7 +8,7 @@ const green = '\x1b[32m';
 const purple = '\x1b[34m';
 
 function quit(s) {
-  console.log('' + red + s + ', quitting.' + plain + '\n');
+  console.log(red + s + ', quitting.' + plain + '\n');
   return process.exit();
 }
 
@@ -87,7 +87,7 @@ async function main() {
       duration,
       '-i',
       inpath,
-      '-c',
+      '-c:v',
       'copy',
       '-avoid_negative_ts',
       'make_zero',
@@ -95,20 +95,20 @@ async function main() {
     ];
 
     const progress = '(' + (i + 1) + '/' + numCuts + ')';
-    const cmdStr = '' + cmd + ' ' + args.join(' ');
+    const cmdStr = cmd + ' ' + args.join(' ');
 
     console.log(
-      '' + green + progress + plain + ' ' + inpath + ' ' + green + '->' + plain
+      green + progress + plain + ' ' + inpath + ' ' + green + '->' + plain
     );
-    console.log('' + outpath + '\n');
-    console.log('' + purple + cmdStr + plain + '\n');
+    console.log(outpath + '\n');
+    console.log(purple + cmdStr + plain + '\n');
 
     child_process.spawnSync(cmd, args, { stdio: 'inherit' });
 
     await transferTimestamps(inpath, outpath);
   }
 
-  return console.log('Done.\n');
+  console.log('Done.\n');
 }
 
 main();

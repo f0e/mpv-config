@@ -1,0 +1,32 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Move files into a folder
+        run: mkdir mpv-cut && mv -t mpv-cut main.lua make_cuts.js
+
+      - name: Install zip
+        run: sudo apt-get install -y zip
+
+      - name: Create archive
+        working-directory: ${{env.GITHUB_WORKSPACE}}
+        run: zip -r mpv-cut.zip mpv-cut
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            mpv-cut.zip
+          fail_on_unmatched_files: true
