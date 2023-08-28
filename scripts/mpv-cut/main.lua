@@ -12,7 +12,7 @@ function log(...)
 end
 
 function cut_render()
-	if cuts[cut_key()] == nil or (cut_index > 1 and cuts[cut_key()]['end'] == nil) then
+	if cuts[cut_key()] == nil or cuts[cut_key()]['end'] == nil then
 		log("No cuts to render")
 		return
 	end
@@ -24,13 +24,14 @@ function cut_render()
 
 	local filename = mp.get_property("filename")
 
-	log("Rendering cuts")
+	print("making cut")
 
 	local args = { "node", MAKE_CUTS_SCRIPT_PATH, indir, filename, cuts_json }
 
 	res, err = mp.command_native({
 		name = "subprocess",
 		playback_only = false,
+		capture_stdout = true,
 		args = args,
 	})
 
