@@ -7,9 +7,18 @@ const plain = '\x1b[0m';
 const green = '\x1b[32m';
 const purple = '\x1b[34m';
 
+// https://stackoverflow.com/a/45242825
+const isSubdirectory = (parent, child) => {
+  const relative = path.relative(parent, child);
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+};
+
+const ffmpegEscapeFilepath = (path) =>
+  path.replaceAll('\\', '\\\\').replaceAll("'", "'\\''");
+
 function quit(s) {
   console.log('' + red + s + ', quitting.' + plain + '\n');
-  return process.exit();
+  return process.exit(1);
 }
 
 function isDir(s) {
@@ -21,13 +30,16 @@ function isDir(s) {
 }
 
 function toHMS(secs) {
-  return [
-    Math.floor(secs / 3600),
-    Math.floor((secs % 3600) / 60),
-    Math.round(((secs % 3600) % 60) * 1000) / 1000,
-  ]
-    .filter(Boolean)
-    .join('-');
+  const hours = Math.floor(secs / 3600);
+  const minutes = Math.floor((secs % 3600) / 60);
+  const remainingSeconds = ((secs % 3600) % 60).toFixed(1);
+
+  const str = [];
+  if (hours > 0) str.push(`${hours}h`);
+  if (minutes > 0) str.push(`${minutes}m`);
+  if (remainingSeconds > 0) str.push(`${remainingSeconds}s`);
+
+  return str.length == 0 ? '0' : str.join('');
 }
 
 async function transferTimestamps(inPath, outPath, offset = 0) {
@@ -44,26 +56,108 @@ async function transferTimestamps(inPath, outPath, offset = 0) {
   }
 }
 
+async function ffmpeg(args) {
+  const cmd = 'ffmpeg';
+  const baseArgs = [
+    // hide output
+    '-nostdin',
+    '-loglevel',
+    'error',
+    // overwrite existing files
+    '-y',
+  ];
+
+  const fullArgs = baseArgs.concat(args);
+
+  const cmdStr = '' + cmd + ' ' + fullArgs.join(' ');
+  console.log('' + purple + cmdStr + plain + '\n');
+
+  child_process.spawnSync(cmd, fullArgs, { stdio: 'inherit' });
+}
+
+async function renderCut(inpath, outpath, start, duration) {
+  const args = [
+    // seek to start before loading file (faster) https://trac.ffmpeg.org/wiki/Seeking#Inputseeking
+    '-ss',
+    start,
+    '-t',
+    duration,
+    '-i',
+    inpath,
+    // don't re-encode
+    '-c',
+    'copy',
+    // shift timestamps so they start at 0
+    '-avoid_negative_ts',
+    'make_zero',
+    outpath,
+  ];
+
+  await ffmpeg(args);
+
+  await transferTimestamps(inpath, outpath);
+}
+
+async function mergeCuts(tempPath, filepaths, outpath) {
+  // i hate that you have to do a separate command and render each cut separately first, i tried using
+  // filter_complex for merging with multiple inputs but it wouldn't let me. todo: look into this further
+
+  const mergeFile = path.join(tempPath, 'merging.txt');
+  await fs.promises.writeFile(
+    mergeFile,
+    filepaths.map((path) => `file '${ffmpegEscapeFilepath(path)}`).join('\n')
+  );
+
+  await ffmpeg([
+    '-f',
+    'concat',
+    '-safe',
+    0,
+    '-i',
+    mergeFile,
+    '-c',
+    'copy',
+    outpath,
+  ]);
+
+  await fs.promises.unlink(mergeFile);
+
+  for (const path of filepaths) {
+    await fs.promises.unlink(path);
+  }
+}
+
 async function main() {
   const argv = process.argv.slice(2);
 
-  const [dir, filename, cutsStr] = argv;
-  const cuts = JSON.parse(cutsStr);
+  const [indir, optionsStr, filename, cutsStr] = argv;
 
-  if (!isDir(dir)) {
-    quit('Directory is invalid');
+  if (!isDir(indir)) quit('Input directory is invalid');
+
+  const options = JSON.parse(optionsStr);
+  const outdir = path.resolve(indir, options.output_dir);
+
+  if (!isDir(outdir)) {
+    if (!isSubdirectory(indir, outdir)) quit('Output directory is invalid');
+
+    // the output directory is a child of the input directory, can assume it's safe to create
+    await fs.promises.mkdir(outdir, { recursive: true });
   }
 
-  const numCuts = Object.keys(cuts).length;
+  const cutsMap = JSON.parse(cutsStr);
+  const cuts = Object.values(cutsMap).sort((a, b) => a.start - b.start);
 
-  for (const [i, cut] of Object.values(cuts).entries()) {
+  const { name: filename_noext, ext: ext } = path.parse(filename);
+
+  const outpaths = [];
+
+  for (const [i, cut] of cuts.entries()) {
     if (!('end' in cut)) continue;
 
-    const { name: filename_noext, ext: ext } = path.parse(filename);
     const duration = parseFloat(cut.end) - parseFloat(cut.start);
 
     const cutName =
-      '(cut) ' +
+      `(cut${cuts.length == 1 ? '' : i + 1}) ` +
       filename_noext +
       ' (' +
       toHMS(cut.start) +
@@ -72,42 +166,25 @@ async function main() {
       ')' +
       ext;
 
-    const inpath = path.join(dir, filename);
-    const outpath = path.join(dir, cutName);
+    const inpath = path.join(indir, filename);
+    const outpath = path.join(outdir, cutName);
 
-    const cmd = 'ffmpeg';
-    const args = [
-      '-nostdin',
-      '-y',
-      '-loglevel',
-      'error',
-      '-ss',
-      cut.start,
-      '-t',
-      duration,
-      '-i',
-      inpath,
-      '-c',
-      'copy',
-      '-map',
-      '0',
-      '-avoid_negative_ts',
-      'make_zero',
-      outpath,
-    ];
-
-    const progress = '(' + (i + 1) + '/' + numCuts + ')';
-    const cmdStr = '' + cmd + ' ' + args.join(' ');
+    const progress = '(' + (i + 1) + '/' + cuts.length + ')';
 
     console.log(
       '' + green + progress + plain + ' ' + inpath + ' ' + green + '->' + plain
     );
     console.log('' + outpath + '\n');
-    console.log('' + purple + cmdStr + plain + '\n');
 
-    child_process.spawnSync(cmd, args, { stdio: 'inherit' });
+    await renderCut(inpath, outpath, cut.start, duration);
+    outpaths.push(outpath);
+  }
 
-    await transferTimestamps(inpath, outpath);
+  if (outpaths.length > 1 && options.multi_cut_mode == 'merge') {
+    const cutName = `(${outpaths.length} merged cuts) ` + filename;
+    const outpath = path.join(outdir, cutName);
+
+    await mergeCuts(indir, outpaths, outpath);
   }
 
   return console.log('Done.\n');
