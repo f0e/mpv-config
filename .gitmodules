@@ -1,0 +1,6 @@
+[submodule "external/ModernZ"]
+	path = external/ModernZ
+	url = https://github.com/Samillion/ModernZ
+[submodule "external/mpv-lossless-cut"]
+	path = external/mpv-lossless-cut
+	url = https://github.com/f0e/mpv-lossless-cut
