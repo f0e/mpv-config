@@ -4,3 +4,6 @@
 [submodule "external/mpv-lossless-cut"]
 	path = external/mpv-lossless-cut
 	url = https://github.com/f0e/mpv-lossless-cut
+[submodule "external/thumbfast"]
+	path = external/thumbfast
+	url = https://github.com/po5/thumbfast
